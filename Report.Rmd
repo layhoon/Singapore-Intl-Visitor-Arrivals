@@ -1,0 +1,334 @@
+---
+title: "Data Processing of Singapore's International Visitor Arrivals Data from 1978 to 2019"
+author: "Lim Lay Hoon"
+date: "16 October 2019"
+output: html_document
+---
+
+
+
+```{r retrieve raw data, include=FALSE}
+library(xlsx)
+library(dplyr)
+library(tidyr)
+library(zoo)
+library(lubridate)
+library(knitr)
+
+knitr::opts_chunk$set(echo=FALSE, results='hold', comment=NA)
+options(width = 100)
+
+readProcessedData <- function(file, sheetName) {
+  df <- read.xlsx(file, sheetName = sheetName, stringsAsFactors = FALSE)
+  df$Month <- as.yearmon(df$Month, "%Y-%m")
+  return(df)
+}
+
+printData <- function(df, header = NULL, alignment, rowsToPrint = c(-1, -1)) {
+
+  df <- as.data.frame(sapply(df, as.character), stringsAsFactors = FALSE)
+  if (!is.null(header)) {
+    df <- rbind(header, df)
+  }
+
+  rows <- nrow(df)
+  cols <- ncol(df)
+  width <- sapply(df, nchar) %>% apply(2, max, na.rm = TRUE) * alignment
+  fmt <- sprintf("%%%ds  ", width)
+  
+  if (rowsToPrint[1] == -1) {
+    rowsToPrint[1] = rows
+    rowsToPrint[2] = 0
+  }
+  
+  for (i in 1:rowsToPrint[1]) {
+    for (j in 1:cols) {
+      cat(sprintf(fmt[j], df[i, j]))
+    }
+    cat("\n")
+  }
+  
+  if (rowsToPrint[2] > 0) {
+    for (i in 1:2) {
+      for (j in 1:cols) {
+        cat(sprintf(fmt[j], "..."))
+      }
+      cat("\n")
+    }
+    for (i in (rows - rowsToPrint[2] + 1):rows) {
+      for (j in 1:cols) {
+        cat(sprintf(fmt[j], df[i, j]))
+      }
+      cat("\n")
+    }
+  }
+  cat("\n")
+}
+
+src <- "Data/International Visitor Arrivals.xlsx"
+
+t1 <- read.xlsx(src, sheetName = "T1", rowIndex = c(6:68), header = FALSE, stringsAsFactors = FALSE)
+t2 <- read.xlsx(src, sheetName = "T2", rowIndex = c(6:18), header = FALSE, stringsAsFactors = FALSE)
+t3 <- read.xlsx(src, sheetName = "T3", rowIndex = c(6:22), header = FALSE, stringsAsFactors = FALSE)
+
+t11 <- readProcessedData("Data/International Visitor Arrivals T1.xlsx", sheetName = "Global Arrivals" )
+t12 <- readProcessedData("Data/International Visitor Arrivals T1.xlsx", sheetName = "Arrivals By Region")
+t13 <- readProcessedData("Data/International Visitor Arrivals T1.xlsx", sheetName = "Arrivals By Country")
+t21 <- readProcessedData("Data/International Visitor Arrivals T2.xlsx", sheetName = "Global Arrivals")
+t22 <- readProcessedData("Data/International Visitor Arrivals T2.xlsx", sheetName = "Arrivals By Sex")
+t23 <- readProcessedData("Data/International Visitor Arrivals T2.xlsx", sheetName = "Arrivals By Age Group")
+t31 <- readProcessedData("Data/International Visitor Arrivals T3.xlsx", sheetName = "Global Arrivals")
+t32 <- readProcessedData("Data/International Visitor Arrivals T3.xlsx", sheetName = "Arrivals By Length Of Stay")
+```
+
+***
+
+<br><br>
+
+### **Introduction**
+
+Singapore's international visitor arrivals data used here is compiled by the [Singapore Tourism Board](https://www.stb.gov.sg/content/stb/en.html). This data, in excel format, can be downloaded from [Singapore Department of Statistics](https://www.singstat.gov.sg/find-data/search-by-theme/industry/tourism/latest-data).
+
+There are 3 worksheets in the excel file: T1, T2 and T3.
+
+* Monthly International Visitor Arrivals By Inbound Tourism Markets (T1)
+* Monthly International Visitor Arrivals By Sex And Age Group (T2)
+* Monthly International Visitor Arrivals By Length Of Stay (T3)
+
+These data are compiled from the Disembarkation/Embarkation Forms (IMM 27) completed by all visitors arriving in Singapore at the points of entry.  These data exclude arrivals of Malaysians by land. In addition, the arrivals data from worksheet T3 only captures data from visitors who left Singapore in less than a year.
+
+<br><br>
+
+### **Monthly International Visitor Arrivals By Inbound Tourism Markets (T1)**
+
+<br>
+
+##### **Raw Data**
+
+Below is an extract from worksheet T1. The monthly arrival data is compile at global, regional and country levels from `r t1[1,2]` to `r t1[1, ncol(t1)]`.
+
+```{r}
+mv <- (t1[-1, -1] == "na") %>% apply(1, sum)/(ncol(t1)-1)*100
+t1$MissingValue <- c("Missing Value", sprintf("%.0f%%", round(mv)))
+
+regionRowNum <- grep("^[ ]{8}[A-Z]", t1$X1)
+numRegion <- length(regionRowNum)
+numRegionWithMV <- sum(t1$MissingValue[regionRowNum] != "0%")
+
+countryRowNum <- grep("^[ ]{12}[A-Z]", t1$X1)
+numCountry <- length(countryRowNum)
+numCountryWithMV <- sum(t1$MissingValue[countryRowNum] != "0%")
+
+rows <- nrow(t1)
+cols <- ncol(t1)
+width <- sapply(t1, nchar) %>% apply(2, max)
+width[1] <- -width[1]
+fmt <- sprintf("%%%ds  %%%ds  %%%ds  ... ...  %%%ds  %%%ds\n", width[1], width[2], width[3], width[cols-1], width[cols])
+for (i in 1:rows)
+  cat(sprintf(fmt, t1[i, 1], t1[i, 2], t1[i, 3], t1[i, cols-1], t1[i, cols]))
+```
+
+The last column shows the percentages of missing arrivals data (na) observed in the dataset.
+
+* The variable "`r t1$X1[2]`" captures the monthly arrivals data at global level. There is no missing arrivals data at this level.
+* There are `r numRegionWithMV` out of `r numRegion` regions with missing arrivals data. They are the Greater China and the North Asia. Both have 94% of their arrivals data missing. However, the arrivals data from the countries in these two regions are mostly available. Hence, one possible way to replace these missing data is by summing up the arrivals data from the countries in these two regions.
+* There are `r numCountryWithMV` out of `r numCountry` countries with missing arrivals data. Hence, to compare the arrivals data at the country level meaningfully, only those years where most of the arrivals data are available should be used.
+
+<br>
+
+##### **Processed Data**
+
+With the missing arrivals data for the Greater China and North Asia regions replaced, the arrival data from worksheet T1 is split and re-organised into global, regional and country levels. Below are the extracts of the transformed data.
+
+```{r}
+cat("Monthly International Visitor Arrivals:\n\n")
+printData(t11, header = colnames(t11), alignment = c(-1, 1), rowsToPrint = c(5, 2))
+
+cat("Monthly International Visitor Arrivals By Regional:\n\n")
+printData(t12, header = colnames(t12), alignment = c(-1, -1, 1), rowsToPrint = c(5, 2))
+
+cat("Monthly International Visitor Arrivals By Country:\n\n")
+printData(t13, header = colnames(t13), alignment = c(-1, -1, -1, 1), rowsToPrint = c(5, 2))
+```
+
+<br>
+
+##### **Comparing Regional Arrivals Data with Global Arrivals Data**
+
+```{r}
+df1 <- data.frame(Year = year(t11$Month), Arrivals = t11$Arrivals) %>% group_by(Year) %>% summarise(Arrivals = sum(Arrivals))
+df2 <- data.frame(Year = year(t12$Month), Arrivals = t12$Arrivals) %>% group_by(Year) %>% summarise(Arrivals = sum(Arrivals))
+df2$Shortfall <- round((df1$Arrivals - df2$Arrivals)/df1$Arrivals * 100, digits = 2)
+df2$Color <- "grey"
+df2$Color[which(df2$Year >= 2017)] <- "blue"
+par(mar = c(3, 3, 3, 3))
+par(cex.main = 1)
+with(df2, plot(Year, Shortfall, col = Color, pch = 19, xlab = "", ylab = "", main = "Shortfall In Arrivals Data (%) By Year"))
+```
+
+The plot above shows the shortfall in the total number of arrivals captured at the regional level.
+
+* From year 1978 to 2016 (in grey), there is shortfall of not more than `r max(df2$Shortfall[df2$Color == "grey"])`% in the total number of arrivals captured at the regional level yearly.
+* From year 2017 to 2019 (in blue), the regional arrivals data tallies with the global arrivals data yearly.
+
+<br>
+
+##### **Comparing Country Arrivals Data with Global Arrivals Data**
+
+```{r}
+df <- data.frame(Year = year(t13$Month), MissingData = is.na(t13$Arrivals))
+df <- group_by(df, Year) %>% summarise(MissingData = round(sum(MissingData)/n() * 100))
+df$Color <- "grey"
+df$Color[which(df$Year <= 1995)] <- "red"
+df$Color[which(df$Year >= 2017)] <- "blue"
+par(mar = c(3, 3, 3, 3))
+par(cex.main = 1)
+with(df, plot(Year, MissingData, col = Color, pch = 19, xlab = "", ylab = "", main = "Missing Arrivals Data (%) By Year"))
+```
+
+```{r}
+df1 <- data.frame(Year = year(t11$Month), Arrivals = t11$Arrivals) %>% group_by(Year) %>% summarise(Arrivals = sum(Arrivals))
+df2 <- data.frame(Year = year(t13$Month), Arrivals = t13$Arrivals) %>% group_by(Year) %>% summarise(Arrivals = sum(Arrivals, na.rm = TRUE))
+df2$Shortfall <- round((df1$Arrivals - df2$Arrivals)/df1$Arrivals * 100)
+df2$Color <- "grey"
+df2$Color[which(df2$Year <= 1995)] <- "red"
+df2$Color[which(df2$Year >= 2017)] <- "blue"
+par(mar = c(3, 3, 3, 3))
+par(cex.main = 1)
+with(df2, plot(Year, Shortfall, col = Color, pch = 19, xlab = "", ylab = "", main = "Shortfall In Arrivals Data (%) By Year"))
+```
+
+The plots above show the percentages of missing arrivals data at the country level and the shortfall in the total number of arrivals captured at the country level.
+
+* From year 1978 to 1995 (in red), the percentage of missing data is between `r min(df$MissingData[df$Color == "red"])`% and `r max(df$MissingData[df$Color == "red"])`% yearly, while the shortfall in arrivals data is between `r min(df2$Shortfall[df2$Color == "red"])`% and `r max(df2$Shortfall[df2$Color == "red"])`% yearly.
+
+* From year 1996 to 2016 (in grey), the percentage of missing data is between `r min(df$MissingData[df$Color == "grey"])`% and `r max(df$MissingData[df$Color == "grey"])`% yearly, while the shortfall in arrivals data is between `r min(df2$Shortfall[df2$Color == "grey"])`% and `r max(df2$Shortfall[df2$Color == "grey"])`% yearly.
+
+* From year 2017 to 2019 (in blue), there is no missing arrivals data. The arrivals data captured at the country level tallies with the global arrivals data yearly.
+
+<br><br>
+
+### **Monthly International Visitor Arrivals By Sex And Age Group (T2)**
+
+<br>
+
+##### **Raw Data**
+
+Below is the data from worksheet T2. The monthly arrival data is compiled at global level, by sex and by age group from `r t2[1,2]` to `r t2[1, ncol(t2)]`.
+
+```{r}
+printData(t2, alignment = c(-1, 1, 1, 1, 1, 1, 1))
+```
+
+<br>
+
+##### **Processed Data**
+
+The arrival data from worksheet T2 is split and re-organised into 3 different tables. Below are the extracts of the transformed data.
+
+```{r}
+cat("Monthly International Visitor Arrivals:\n\n")
+printData(t21, header = colnames(t21), alignment = c(-1, 1))
+
+cat("Monthly International Visitor Arrivals By Sex:\n\n")
+printData(t22, header = colnames(t22), alignment = c(-1, -1, 1))
+
+cat("Monthly International Visitor Arrivals By Age Group:\n\n")
+printData(t23, header = c("Age Group", "Month", "Arrivals"), alignment = c(-1, -1, 1), rowsToPrint = c(9, 8))
+```
+
+<br>
+
+##### **Comparing Global Arrivals Data from T2 with Global Arrivals Data from T1**
+
+The global arrivals data from T2 tallies with that from T1.
+
+```{r}
+df <- left_join(t21, t11, by = "Month", suffix = c(".T2", ".T1")) %>% mutate(Difference = Arrivals.T2 - Arrivals.T1)
+printData(df, header = c("Month", "Global Arrivals from T2 (A)", "Global Arrivals from T1 (B)", "(A)-(B)"), alignment = c(-1, 1, 1, 1))
+```
+
+<br>
+
+##### **Comparing Arrivals Data By Sex With Global Arrivals Data from T2**
+
+The arrivals data captured by sex tallies with the global arrivals data from T2.
+
+```{r}
+df <- group_by(t22, Month) %>% summarise(Arrivals = sum(Arrivals)) %>% data.frame()
+df <- left_join(df, t21, by = "Month", suffix = c(".BySex", ".Global")) %>% mutate(Difference = Arrivals.BySex - Arrivals.Global)
+printData(df, header = c("Month", "Arrivals By Sex (A)", "Global Arrivals from T2 (B)", "(A)-(B)"), alignment = c(-1, 1, 1, 1))
+```
+
+<br>
+
+##### **Comparing Arrivals Data By Age Group With Global Arrivals Data from T2**
+
+The arrivals data captured by age group tallies with the global arrivals data from T2.
+
+```{r}
+df <- group_by(t23, Month) %>% summarise(Arrivals = sum(Arrivals)) %>% data.frame()
+df <- left_join(df, t21, by = "Month", suffix = c(".ByAgeGroup", ".Global")) %>% mutate(Difference = Arrivals.ByAgeGroup - Arrivals.Global)
+printData(df, header = c("Month", "Arrivals By Age Group (A)", "Global Arrivals from T2 (B)", "(A)-(B)"), alignment = c(-1, 1, 1, 1))
+```
+
+<br><br>
+
+### **Monthly International Visitor Arrivals By Length Of Stay (T3)**
+
+<br>
+
+##### **Raw Data**
+
+Below is the data from worksheet T3. The monthly arrival data is compile at global level and by length of stay from `r t3[1,2]` to `r t3[1, ncol(t3)]`.
+
+```{r}
+printData(t3, alignment = c(-1, 1, 1, 1, 1, 1, 1))
+```
+
+<br>
+
+##### **Processed Data**
+
+The arrival data from worksheet T3 is split and re-organised into 2 different tables. Below are the extracts of the transformed data.
+
+```{r}
+cat("Monthly International Visitor Arrivals:\n\n")
+printData(t31, header = colnames(t31), alignment = c(-1, 1))
+
+cat("Monthly International Visitor Arrivals By Length of Stay:\n\n")
+printData(t32, header = c("Length Of Stay", "Month", "Arrivals"), alignment = c(-1, -1, 1), rowsToPrint = c(15, 14))
+```
+
+<br>
+
+##### **Comparing Global Arrivals Data from T3 with Global Arrivals Data from T1**
+
+The global arrivals data from T3 does not tally with that from T1.
+
+```{r}
+df <- left_join(t31, t11, by = "Month", suffix = c(".T3", ".T1")) %>% mutate(Difference = Arrivals.T3 - Arrivals.T1)
+printData(df, header = c("Month", "Global Arrivals from T3 (A)", "Global Arrivals from T1 (B)", "(A)-(B)"), alignment = c(-1, 1, 1, 1))
+```
+
+<br>
+
+##### **Comparing Arrivals Data By Length of Stay With Global Arrivals Data from T3**
+
+The arrivals data captured by length of stay does not tally with the global arrivals data from T3.
+
+```{r}
+df <- group_by(t32, Month) %>% summarise(Arrivals = sum(Arrivals)) %>% data.frame()
+df <- left_join(df, t31, by = "Month", suffix = c(".ByLengthOfStay", ".Global")) %>% mutate(Difference = Arrivals.ByLengthOfStay - Arrivals.Global)
+printData(df, header = c("Month", "Arrivals By Length Of Stay (A)", "Global Arrivals from T3 (B)", "(A)-(B)"), alignment = c(-1, 1, 1, 1))
+```
+
+
+<br><br>
+
+### **Related Links**
+
+Click [here](https://github.com/layhoon/Singapore-Intl-Visitor-Arrivals) to view the source code for the data processing and the data files.
+
+Click [here](https://public.tableau.com/profile/lim7873#!/vizhome/SingaporeTourism_15684547881670/InternationalArrivals) to view the arrivals data from 2009 to 2018 at country level graphically.
+
