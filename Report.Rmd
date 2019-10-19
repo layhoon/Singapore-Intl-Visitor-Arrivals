@@ -206,6 +206,30 @@ The plots above show the percentages of missing arrivals data at the country lev
 
 * From year 2017 to 2019 (in blue), there is no missing arrivals data. The arrivals data captured at the country level tallies with the global arrivals data yearly.
 
+<br>
+
+Below are the countries with missing arrivals data from year 1978 to 1995.
+
+```{r}
+months <- (1995 - 1978 + 1) * 12
+countryRed <- filter(t13, year(Month) >= 1978 & year(Month) <= 1995, is.na(Arrivals))
+countryRed <- group_by(countryRed, Country) %>% summarise(MissingValue = n()/months * 100) %>% arrange(-MissingValue)
+countryRed$MissingValue <- sprintf("%.0f%%", countryRed$MissingValue)
+printData(countryRed, header = c("Country", "Missing Value"), alignment = c(-1, 1))
+```
+
+<br>
+
+Below are the countries with missing arrivals data from year 1996 to 2016.
+
+```{r}
+months <- (2016 - 1996 + 1) * 12
+countryGrey <- filter(t13, year(Month) >= 1996 & year(Month) <= 2016, is.na(Arrivals))
+countryGrey <- group_by(countryGrey, Country) %>% summarise(MissingValue = n()/months * 100) %>% arrange(-MissingValue)
+countryGrey$MissingValue <- sprintf("%.0f%%", countryGrey$MissingValue)
+printData(countryGrey, header = c("Country", "Missing Value"), alignment = c(-1, 1))
+```
+
 <br><br>
 
 ### **Monthly International Visitor Arrivals By Sex And Age Group (T2)**
